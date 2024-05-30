@@ -2,21 +2,61 @@
 name: "Chromatic Deployment"
 
 # Event for the workflow
-on: push
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 # List of jobs
 jobs:
-  test:
+  deploy:
     # Operating System
     runs-on: ubuntu-latest
     # Job steps
     steps:
-      - uses: actions/checkout@v1
-      - run: yarn
-        #👇 Adds Chromatic as a step in the workflow
-      - uses: chromaui/action@v1
-        # Options required for Chromatic's GitHub Action
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: npm install
+
+      #👇 Adds Chromatic as a step in the workflow
+      - name: Publish to Chromatic
+        id: publish
+        uses: chromaui/action@v1
         with:
           #👇 Chromatic projectToken, see https://storybook.js.org/tutorials/intro-to-storybook/react/ko/deploy/ to obtain it
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Add a step to post the Chromatic build URL as a comment on the PR
+      - name: Comment on PR with Chromatic URL
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v4
+        with:
+          script: |
+            const { builds } = require('@chromaui/chromatic-cli');
+            const { data: comments } = await github.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const body = `🎨 Storybook preview: ${builds[0].webUrl}`;
+            const comment = comments.find(comment => comment.user.login === 'github-actions[bot]' && comment.body.startsWith('🎨 Storybook preview:'));
+            if (comment) {
+              await github.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: comment.id,
+                body,
+              });
+            } else {
+              await github.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
